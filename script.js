@@ -2,283 +2,317 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 const scoreEl = document.getElementById("score");
-const livesEl = document.getElementById("lives");
+const matchTimerEl = document.getElementById("matchTimer");
+const comboEl = document.getElementById("combo");
+const comboTimerEl = document.getElementById("comboTimer");
+const coreHealthEl = document.getElementById("coreHealth");
+const playerHealthEl = document.getElementById("playerHealth");
 const statusEl = document.getElementById("status");
 
-const winModal = document.getElementById("winModal");
-const siteInput = document.getElementById("siteInput");
-const goButton = document.getElementById("goButton");
-const cancelButton = document.getElementById("cancelButton");
+const COLOR_SET = {
+  red: { hex: "#ff4862", key: "1" },
+  blue: { hex: "#51adff", key: "2" },
+  green: { hex: "#43e77b", key: "3" },
+};
+const COLOR_KEYS = Object.keys(COLOR_SET);
 
-const paddle = {
-  width: 125,
-  height: 16,
-  x: canvas.width / 2 - 62.5,
-  y: canvas.height - 28,
-  speed: 9,
+const state = {
+  score: 0,
+  matchTime: 180,
+  comboCount: 0,
+  comboTime: 0,
+  coreHealth: 100,
+  playerHealth: 100,
+  spawnClock: 0,
+  fireClock: 0,
+  gameOver: false,
 };
 
-const ball = {
+const player = {
   x: canvas.width / 2,
-  y: canvas.height - 55,
-  radius: 17,
-  dx: 4,
-  dy: -4,
+  y: canvas.height / 2 + 120,
+  radius: 14,
+  speed: 260,
+  color: "red",
+  dashCooldown: 0,
+  pulseCooldown: 0,
 };
 
-const brick = {
-  rows: 5,
-  cols: 9,
-  width: 72,
-  height: 28,
-  gap: 12,
-  top: 68,
-  left: 36,
-};
+const core = { x: canvas.width / 2, y: canvas.height / 2, radius: 34 };
+const enemies = [];
+const bullets = [];
+const keys = new Set();
+const mouse = { x: canvas.width / 2, y: canvas.height / 2, down: false };
 
-const bricks = [];
-let score = 0;
-let lives = 3;
-let gameOver = false;
-let gameWon = false;
+function rand(min, max) {
+  return Math.random() * (max - min) + min;
+}
 
-function buildBricks() {
-  for (let r = 0; r < brick.rows; r += 1) {
-    bricks[r] = [];
-    for (let c = 0; c < brick.cols; c += 1) {
-      bricks[r][c] = {
-        x: brick.left + c * (brick.width + brick.gap),
-        y: brick.top + r * (brick.height + brick.gap),
-        visible: true,
-      };
+function spawnEnemy(intensity) {
+  const edge = Math.floor(Math.random() * 4);
+  let x = 0;
+  let y = 0;
+  if (edge === 0) {
+    x = rand(0, canvas.width);
+    y = -20;
+  } else if (edge === 1) {
+    x = canvas.width + 20;
+    y = rand(0, canvas.height);
+  } else if (edge === 2) {
+    x = rand(0, canvas.width);
+    y = canvas.height + 20;
+  } else {
+    x = -20;
+    y = rand(0, canvas.height);
+  }
+
+  const color = COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
+  enemies.push({
+    x,
+    y,
+    radius: rand(10, 16),
+    speed: rand(55, 105) + intensity * 7,
+    health: 22 + intensity * 2,
+    color,
+  });
+}
+
+function fireBullet() {
+  const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+  bullets.push({
+    x: player.x,
+    y: player.y,
+    vx: Math.cos(angle) * 580,
+    vy: Math.sin(angle) * 580,
+    radius: 4,
+    color: player.color,
+    life: 0.9,
+  });
+}
+
+function pulse() {
+  if (player.pulseCooldown > 0) return;
+  player.pulseCooldown = 3;
+  enemies.forEach((enemy) => {
+    const d = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+    if (d < 130 && enemy.color === player.color) {
+      enemy.health -= 28;
     }
-  }
-}
-
-function drawBanana(x, y, width, height) {
-  ctx.save();
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  ctx.translate(cx, cy);
-  ctx.scale(width / 80, height / 40);
-
-  ctx.beginPath();
-  ctx.moveTo(-30, 10);
-  ctx.quadraticCurveTo(0, -18, 30, 10);
-  ctx.quadraticCurveTo(0, 17, -30, 10);
-  ctx.closePath();
-  ctx.fillStyle = "#f8e85a";
-  ctx.fill();
-  ctx.strokeStyle = "#e3bc1f";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(-28, 8);
-  ctx.quadraticCurveTo(0, -9, 28, 8);
-  ctx.strokeStyle = "#f5f4d0";
-  ctx.lineWidth = 1.4;
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawStrawberry(x, y, radius) {
-  ctx.save();
-
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = "#df3153";
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(x - radius * 0.7, y - radius * 0.4);
-  ctx.quadraticCurveTo(x, y + radius * 1.1, x + radius * 0.7, y - radius * 0.4);
-  ctx.closePath();
-  ctx.fillStyle = "#e83e61";
-  ctx.fill();
-
-  ctx.fillStyle = "#ffd95f";
-  for (let i = 0; i < 14; i += 1) {
-    const angle = (Math.PI * 2 * i) / 14;
-    const sx = x + Math.cos(angle) * (radius * 0.65);
-    const sy = y + Math.sin(angle) * (radius * 0.5);
-    ctx.fillRect(sx - 1.2, sy - 1.2, 2.4, 2.4);
-  }
-
-  ctx.beginPath();
-  ctx.ellipse(x, y - radius * 0.82, radius * 0.58, radius * 0.35, 0, 0, Math.PI * 2);
-  ctx.fillStyle = "#3ea947";
-  ctx.fill();
-
-  ctx.restore();
-}
-
-function drawPaddle() {
-  ctx.fillStyle = "#15253b";
-  ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
-}
-
-function drawBricks() {
-  bricks.forEach((row) => {
-    row.forEach((b) => {
-      if (b.visible) {
-        drawBanana(b.x, b.y, brick.width, brick.height);
-      }
-    });
   });
 }
 
-function resetBallAndPaddle() {
-  ball.x = canvas.width / 2;
-  ball.y = canvas.height - 55;
-  ball.dx = (Math.random() > 0.5 ? 1 : -1) * 4;
-  ball.dy = -4;
-  paddle.x = canvas.width / 2 - paddle.width / 2;
+function dash() {
+  if (player.dashCooldown > 0) return;
+  player.dashCooldown = 1.7;
+  const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+  player.x += Math.cos(angle) * 110;
+  player.y += Math.sin(angle) * 110;
+  player.x = Math.min(canvas.width - 8, Math.max(8, player.x));
+  player.y = Math.min(canvas.height - 8, Math.max(8, player.y));
 }
 
-function collisionDetection() {
-  bricks.forEach((row) => {
-    row.forEach((b) => {
-      if (!b.visible) return;
+function registerKill(matched) {
+  state.score += matched ? 150 : 70;
+  state.comboCount += 1;
+  state.comboTime = 2.4;
+}
 
-      const overlapsX = ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brick.width;
-      const overlapsY = ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brick.height;
+function update(dt) {
+  if (state.gameOver) return;
 
-      if (overlapsX && overlapsY) {
-        b.visible = false;
-        ball.dy *= -1;
-        score += 10;
-        scoreEl.textContent = `Score: ${score}`;
-      }
+  state.matchTime -= dt;
+  state.spawnClock += dt;
+  state.fireClock -= dt;
+  player.dashCooldown = Math.max(0, player.dashCooldown - dt);
+  player.pulseCooldown = Math.max(0, player.pulseCooldown - dt);
+
+  if (state.comboTime > 0) {
+    state.comboTime -= dt;
+  } else {
+    state.comboCount = 0;
+  }
+
+  const intensity = Math.floor((180 - state.matchTime) / 30);
+  const spawnInterval = Math.max(0.2, 0.82 - intensity * 0.07);
+  if (state.spawnClock >= spawnInterval) {
+    state.spawnClock = 0;
+    const pack = 1 + Math.floor(intensity / 2);
+    for (let i = 0; i < pack; i += 1) spawnEnemy(intensity);
+  }
+
+  let moveX = 0;
+  let moveY = 0;
+  if (keys.has("ArrowUp") || keys.has("w")) moveY -= 1;
+  if (keys.has("ArrowDown") || keys.has("s")) moveY += 1;
+  if (keys.has("ArrowLeft") || keys.has("a")) moveX -= 1;
+  if (keys.has("ArrowRight") || keys.has("d")) moveX += 1;
+  const len = Math.hypot(moveX, moveY) || 1;
+  player.x += (moveX / len) * player.speed * dt;
+  player.y += (moveY / len) * player.speed * dt;
+  player.x = Math.min(canvas.width - player.radius, Math.max(player.radius, player.x));
+  player.y = Math.min(canvas.height - player.radius, Math.max(player.radius, player.y));
+
+  if (mouse.down && state.fireClock <= 0) {
+    fireBullet();
+    state.fireClock = 0.09;
+  }
+
+  bullets.forEach((b) => {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.life -= dt;
+  });
+
+  enemies.forEach((enemy) => {
+    const toCoreX = core.x - enemy.x;
+    const toCoreY = core.y - enemy.y;
+    const mag = Math.hypot(toCoreX, toCoreY) || 1;
+    enemy.x += (toCoreX / mag) * enemy.speed * dt;
+    enemy.y += (toCoreY / mag) * enemy.speed * dt;
+
+    if (Math.hypot(enemy.x - player.x, enemy.y - player.y) < enemy.radius + player.radius) {
+      state.playerHealth -= 20 * dt;
+    }
+    if (Math.hypot(enemy.x - core.x, enemy.y - core.y) < enemy.radius + core.radius) {
+      state.coreHealth -= 25 * dt;
+    }
+  });
+
+  bullets.forEach((b) => {
+    enemies.forEach((enemy) => {
+      if (enemy.health <= 0) return;
+      const hit = Math.hypot(enemy.x - b.x, enemy.y - b.y) < enemy.radius + b.radius;
+      if (!hit) return;
+
+      const matched = enemy.color === b.color;
+      enemy.health -= matched ? 24 : 9;
+      b.life = 0;
+      if (enemy.health <= 0) registerKill(matched);
     });
   });
 
-  if (score === brick.rows * brick.cols * 10) {
-    gameWon = true;
-    statusEl.textContent = "All bananas cleared!";
-    winModal.classList.remove("hidden");
-    siteInput.focus();
+  for (let i = enemies.length - 1; i >= 0; i -= 1) {
+    if (enemies[i].health <= 0) enemies.splice(i, 1);
   }
+  for (let i = bullets.length - 1; i >= 0; i -= 1) {
+    const out = bullets[i].x < -30 || bullets[i].x > canvas.width + 30 || bullets[i].y < -30 || bullets[i].y > canvas.height + 30;
+    if (out || bullets[i].life <= 0) bullets.splice(i, 1);
+  }
+
+  if (state.matchTime <= 0) {
+    state.matchTime = 0;
+    state.gameOver = true;
+    statusEl.textContent = state.coreHealth > 0 ? "Round clear! Core defended." : "Timer hit zero, but the core was destroyed.";
+  }
+
+  if (state.coreHealth <= 0 || state.playerHealth <= 0) {
+    state.gameOver = true;
+    statusEl.textContent = state.coreHealth <= 0 ? "Core destroyed. Swarm victory." : "Hull failure. Pilot down.";
+  }
+
+  const comboMult = 1 + Math.floor(state.comboCount / 5);
+  scoreEl.textContent = Math.round(state.score * comboMult);
+  matchTimerEl.textContent = state.matchTime.toFixed(0);
+  comboEl.textContent = comboMult;
+  comboTimerEl.textContent = Math.max(0, state.comboTime).toFixed(1);
+  coreHealthEl.textContent = Math.max(0, state.coreHealth).toFixed(0);
+  playerHealthEl.textContent = Math.max(0, state.playerHealth).toFixed(0);
 }
 
-function drawFrame() {
+function drawArena() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawBricks();
-  drawPaddle();
-  drawStrawberry(ball.x, ball.y, ball.radius);
 
-  if (gameOver || gameWon) return;
-
-  ball.x += ball.dx;
-  ball.y += ball.dy;
-
-  if (ball.x + ball.radius > canvas.width || ball.x - ball.radius < 0) {
-    ball.dx *= -1;
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  for (let i = 0; i < 8; i += 1) {
+    ctx.strokeStyle = `hsl(${205 + i * 8} 100% 60%)`;
+    ctx.beginPath();
+    ctx.arc(core.x, core.y, 70 + i * 36, 0, Math.PI * 2);
+    ctx.stroke();
   }
+  ctx.restore();
 
-  if (ball.y - ball.radius < 0) {
-    ball.dy *= -1;
-  }
+  ctx.beginPath();
+  ctx.arc(core.x, core.y, core.radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#9ef3ff";
+  ctx.shadowColor = "#7ceeff";
+  ctx.shadowBlur = 26;
+  ctx.fill();
+  ctx.shadowBlur = 0;
 
-  if (
-    ball.y + ball.radius > paddle.y &&
-    ball.x > paddle.x &&
-    ball.x < paddle.x + paddle.width
-  ) {
-    const hitPos = (ball.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
-    ball.dx = hitPos * 5;
-    ball.dy = -Math.abs(ball.dy);
-  }
+  enemies.forEach((enemy) => {
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+    ctx.fillStyle = COLOR_SET[enemy.color].hex;
+    ctx.shadowColor = COLOR_SET[enemy.color].hex;
+    ctx.shadowBlur = 12;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
 
-  if (ball.y + ball.radius > canvas.height) {
-    lives -= 1;
-    livesEl.textContent = `Lives: ${lives}`;
+  bullets.forEach((b) => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fillStyle = COLOR_SET[b.color].hex;
+    ctx.fill();
+  });
 
-    if (lives <= 0) {
-      gameOver = true;
-      statusEl.textContent = "Game over! Refresh to play Fruit Out again.";
-      return;
-    }
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fillStyle = COLOR_SET[player.color].hex;
+  ctx.shadowColor = COLOR_SET[player.color].hex;
+  ctx.shadowBlur = 18;
+  ctx.fill();
+  ctx.shadowBlur = 0;
 
-    resetBallAndPaddle();
-  }
-
-  collisionDetection();
-
-  requestAnimationFrame(drawFrame);
+  const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+  ctx.strokeStyle = "#f2f7ff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y);
+  ctx.lineTo(player.x + Math.cos(angle) * 20, player.y + Math.sin(angle) * 20);
+  ctx.stroke();
 }
 
-const keys = { left: false, right: false };
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  update(dt);
+  drawArena();
+  requestAnimationFrame(loop);
+}
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
-    keys.left = true;
-  }
-
-  if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
-    keys.right = true;
-  }
+  const key = event.key.toLowerCase();
+  keys.add(event.key);
+  keys.add(key);
+  if (key === COLOR_SET.red.key) player.color = "red";
+  if (key === COLOR_SET.blue.key) player.color = "blue";
+  if (key === COLOR_SET.green.key) player.color = "green";
+  if (event.code === "Space") dash();
+  if (event.key === "Shift") pulse();
+  if (state.gameOver && key === "r") window.location.reload();
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
-    keys.left = false;
-  }
-
-  if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
-    keys.right = false;
-  }
+  keys.delete(event.key);
+  keys.delete(event.key.toLowerCase());
 });
 
-function updatePaddle() {
-  if (keys.left) {
-    paddle.x = Math.max(0, paddle.x - paddle.speed);
-  }
-
-  if (keys.right) {
-    paddle.x = Math.min(canvas.width - paddle.width, paddle.x + paddle.speed);
-  }
-
-  if (!gameOver && !gameWon) {
-    requestAnimationFrame(updatePaddle);
-  }
-}
-
-function destinationFromInput(rawValue) {
-  const value = rawValue.trim();
-  if (!value) return null;
-
-  const hasProtocol = /^https?:\/\//i.test(value);
-  if (hasProtocol) {
-    return value;
-  }
-
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
-}
-
-goButton.addEventListener("click", () => {
-  const destination = destinationFromInput(siteInput.value);
-  if (!destination) {
-    siteInput.focus();
-    return;
-  }
-
-  window.location.href = destination;
+canvas.addEventListener("mousemove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  mouse.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
 });
 
-cancelButton.addEventListener("click", () => {
-  winModal.classList.add("hidden");
+canvas.addEventListener("mousedown", () => {
+  mouse.down = true;
 });
 
-siteInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    goButton.click();
-  }
+canvas.addEventListener("mouseup", () => {
+  mouse.down = false;
 });
 
-buildBricks();
-scoreEl.textContent = `Score: ${score}`;
-livesEl.textContent = `Lives: ${lives}`;
-requestAnimationFrame(drawFrame);
-requestAnimationFrame(updatePaddle);
+statusEl.textContent = "Defend the core. Press R to restart after defeat.";
+requestAnimationFrame(loop);
