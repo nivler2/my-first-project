@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fruit Out</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="game-wrapper">
+      <h1>🍓 Fruit Out 🍌</h1>
+      <p class="instructions">
+        Break every banana with the strawberry. Use ← and → or A / D keys to move.
+      </p>
+      <canvas id="gameCanvas" width="800" height="550" aria-label="Fruit Out game"></canvas>
+      <div class="hud">
+        <span id="score">Score: 0</span>
+        <span id="lives">Lives: 3</span>
+      </div>
+      <p id="status" role="status"></p>
+    </main>
+
+    <div id="winModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="winTitle">
+      <div class="modal-content">
+        <h2 id="winTitle">You cleared Fruit Out! 🎉</h2>
+        <p>What site do you want to visit next?</p>
+        <input id="siteInput" type="text" placeholder="example.com or https://example.com" />
+        <div class="modal-actions">
+          <button id="goButton">Go</button>
+          <button id="cancelButton" class="secondary">Stay Here</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
